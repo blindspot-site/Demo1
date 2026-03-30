@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discover India — Interactive Tourism</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --saffron: #E8621A;
+    --saffron-glow: rgba(232,98,26,0.35);
+    --gold: #F0A500;
+    --gold-light: #FFD166;
+    --deep: #0D1117;
+    --ink: #13192A;
+    --surface: #1A2235;
+    --surface2: #1F2940;
+    --white: #F7F3EE;
+    --muted: rgba(247,243,238,0.5);
+    --faint: rgba(247,243,238,0.18);
+    --glass: rgba(247,243,238,0.04);
+    --glass-border: rgba(247,243,238,0.10);
+    --panel-w: 440px;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--deep);
+    color: var(--white);
+    font-family: 'Outfit', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Grain overlay for texture ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0.6;
+  }
+
+  .app {
+    display: flex;
+    height: 100vh;
+    position: relative;
+  }
+
+  /* ── Ambient glow behind map ── */
+  .map-glow {
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(232,98,26,0.08) 0%, transparent 70%);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: left 0.5s var(--ease);
+  }
+  .map-glow.shifted { left: 30%; }
+
+  /* ── Header ── */
+  .header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 50;
+    padding: 24px 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  .logo em { color: var(--saffron); font-style: normal; }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .crumb { cursor: pointer; transition: color 0.2s; }
+  .crumb:hover { color: var(--saffron); }
+  .crumb.active { color: var(--white); cursor: default; }
+  .sep { opacity: 0.3; }
+
+  /* ── Map area ── */
+  .map-area {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.55s var(--ease);
+  }
+  .map-area.shifted {
+    transform: translateX(calc(var(--panel-w) / -2));
+  }
+
+  /* Loading state */
+  .map-loading {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 0.05em;
+  }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--faint);
+    border-top-color: var(--saffron);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* D3 map container */
+  #map-svg {
+    width: min(52vw, 540px);
+    height: auto;
+    overflow: visible;
+  }
+
+  /* State styles via D3/CSS */
+  .state-path {
+    fill: #1C3352;
+    stroke: #0D1117;
+    stroke-width: 0.8;
+    cursor: default;
+    transition: fill 0.25s, filter 0.25s;
+  }
+  .state-path:hover {
+    fill: #254568;
+  }
+  .state-path.delhi-state {
+    fill: var(--saffron);
+    stroke: var(--white);
+    stroke-width: 1.2;
+    cursor: pointer;
+    filter: drop-shadow(0 0 10px var(--saffron-glow));
+    transition: fill 0.2s, filter 0.2s;
+  }
+  .state-path.delhi-state:hover {
+    fill: #FF7B35;
+    filter: drop-shadow(0 0 20px rgba(232,98,26,0.7));
+  }
+  .state-path.delhi-state.active {
+    fill: var(--gold);
+    filter: drop-shadow(0 0 24px rgba(240,165,0,0.8));
+  }
+
+  /* Delhi pulse rings */
+  .delhi-ring {
+    fill: none;
+    stroke: var(--saffron);
+    stroke-width: 1.5;
+    pointer-events: none;
+  }
+  .delhi-ring-1 { animation: ringPulse 2.2s ease-out infinite; }
+  .delhi-ring-2 { animation: ringPulse 2.2s ease-out 0.7s infinite; }
+  @keyframes ringPulse {
+    0%   { r: 6; opacity: 0.9; }
+    100% { r: 22; opacity: 0; }
+  }
+
+  /* Delhi tooltip label */
+  .delhi-tooltip {
+    pointer-events: none;
+    animation: labelFloat 2.5s ease-in-out infinite alternate;
+  }
+  @keyframes labelFloat {
+    from { transform: translateY(0); }
+    to   { transform: translateY(-4px); }
+  }
+
+  /* Hint pill */
+  .hint-pill {
+    position: absolute;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(16px);
+    padding: 10px 24px;
+    border-radius: 100px;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    white-space: nowrap;
+    animation: pillFloat 3s ease-in-out infinite alternate;
+    transition: opacity 0.4s;
+  }
+  @keyframes pillFloat {
+    from { transform: translateX(-50%) translateY(0); }
+    to   { transform: translateX(-50%) translateY(-8px); }
+  }
+  .hint-pill.hidden { opacity: 0; pointer-events: none; }
+
+  /* ── Side Panel ── */
+  .panel {
+    position: absolute;
+    top: 0; right: 0;
+    width: var(--panel-w);
+    height: 100%;
+    background: var(--ink);
+    border-left: 1px solid var(--glass-border);
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform 0.55s var(--ease);
+    z-index: 40;
+  }
+  .panel.open { transform: translateX(0); }
+  .panel-inner { padding: 96px 36px 48px; }
+
+  /* Panel header */
+  .panel-eyebrow {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--saffron);
+    margin-bottom: 10px;
+  }
+  .panel-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 44px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--white) 0%, rgba(247,243,238,0.7) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .panel-desc {
+    font-size: 14px;
+    font-weight: 300;
+    color: var(--muted);
+    line-height: 1.7;
+    margin-bottom: 36px;
+  }
+
+  /* Close */
+  .close-btn {
+    position: absolute;
+    top: 28px; right: 28px;
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .close-btn:hover { background: rgba(232,98,26,0.15); color: var(--saffron); border-color: rgba(232,98,26,0.3); }
+
+  /* Back */
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    cursor: pointer;
+    margin-bottom: 32px;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 0;
+    transition: color 0.2s;
+  }
+  .back-btn:hover { color: var(--saffron); }
+
+  /* Views */
+  .view { display: none; }
+  .view.active {
+    display: block;
+    animation: viewIn 0.4s var(--ease) forwards;
+  }
+  @keyframes viewIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Main option cards ── */
+  .option-grid { display: grid; gap: 12px; }
+  .option-card {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--glass-border);
+    border-radius: 18px;
+    padding: 24px 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    overflow: hidden;
+    transition: border-color 0.25s, transform 0.25s, background 0.25s;
+  }
+  .option-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .option-card.food-card::before { background: linear-gradient(135deg, rgba(232,98,26,0.08) 0%, transparent 60%); }
+  .option-card.shop-card::before { background: linear-gradient(135deg, rgba(240,165,0,0.08) 0%, transparent 60%); }
+  .option-card:hover { border-color: rgba(232,98,26,0.35); transform: translateY(-2px); }
+  .option-card:hover::before { opacity: 1; }
+
+  .option-icon {
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px;
+    flex-shrink: 0;
+  }
+  .option-icon.food { background: rgba(232,98,26,0.12); border: 1px solid rgba(232,98,26,0.2); }
+  .option-icon.shop { background: rgba(240,165,0,0.10); border: 1px solid rgba(240,165,0,0.2); }
+
+  .option-text h3 { font-size: 17px; font-weight: 500; margin-bottom: 4px; }
+  .option-text p  { font-size: 13px; color: var(--muted); font-weight: 300; line-height: 1.5; }
+  .option-arrow   { margin-left: auto; color: var(--faint); font-size: 20px; transition: transform 0.2s, color 0.2s; flex-shrink: 0; }
+  .option-card:hover .option-arrow { transform: translateX(5px); color: var(--saffron); }
+
+  /* ── Food sub cards ── */
+  .food-card-item {
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+    margin-bottom: 14px;
+    transition: border-color 0.25s;
+  }
+  .food-card-item:hover { border-color: rgba(232,98,26,0.3); }
+  .food-header {
+    padding: 22px 24px 16px;
+    background: var(--surface);
+  }
+  .food-header h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .food-header p { font-size: 13px; color: var(--muted); line-height: 1.6; font-weight: 300; }
+  .food-body {
+    padding: 16px 24px 20px;
+    background: rgba(0,0,0,0.25);
+  }
+  .chip-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--saffron);
+    margin-bottom: 12px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    padding: 5px 14px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 400;
+    border: 1px solid rgba(232,98,26,0.25);
+    background: rgba(232,98,26,0.08);
+    color: var(--white);
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .chip:hover { background: rgba(232,98,26,0.18); border-color: rgba(232,98,26,0.45); }
+  .chip.gold-chip {
+    border-color: rgba(240,165,0,0.25);
+    background: rgba(240,165,0,0.08);
+  }
+  .chip.gold-chip:hover { background: rgba(240,165,0,0.18); border-color: rgba(240,165,0,0.45); }
+
+  /* ── Shopping accordion ── */
+  .shop-accordion {
+    border: 1px solid var(--glass-border);
+    border-radius: 18px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    transition: border-color 0.25s;
+  }
+  .shop-accordion:hover { border-color: rgba(240,165,0,0.25); }
+  .shop-accordion-header {
+    padding: 20px 24px;
+    background: var(--surface);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: background 0.2s;
+    user-select: none;
+  }
+  .shop-accordion-header:hover { background: var(--surface2); }
+  .shop-acc-icon { font-size: 22px; }
+  .shop-accordion-header h3 { font-size: 17px; font-weight: 500; flex: 1; }
+  .shop-acc-chevron {
+    color: var(--muted);
+    font-size: 13px;
+    transition: transform 0.35s var(--ease);
+  }
+  .shop-accordion.open .shop-acc-chevron { transform: rotate(180deg); }
+  .shop-accordion-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.45s var(--ease);
+    background: rgba(0,0,0,0.2);
+  }
+  .shop-accordion.open .shop-accordion-body { max-height: 220px; }
+  .shop-acc-inner { padding: 18px 24px 22px; }
+  .shop-acc-inner p { font-size: 13px; color: var(--muted); line-height: 1.7; margin-bottom: 14px; font-weight: 300; }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: var(--glass-border);
+    margin: 28px 0;
+  }
+
+  /* Scrollbar */
+  .panel::-webkit-scrollbar { width: 3px; }
+  .panel::-webkit-scrollbar-track { background: transparent; }
+  .panel::-webkit-scrollbar-thumb { background: var(--glass-border); border-radius: 3px; }
+
+  /* ── Mobile ── */
+  @media (max-width: 860px) {
+    :root { --panel-w: 100vw; }
+    #map-svg { width: 88vw; }
+    .map-area.shifted { transform: none; }
+    .panel-inner { padding: 88px 24px 40px; }
+    .panel-title { font-size: 36px; }
+    .header { padding: 18px 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Ambient glow -->
+  <div class="map-glow" id="mapGlow"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="logo">Discover <em>India</em></div>
+    <nav class="breadcrumb" id="breadcrumb">
+      <span class="crumb active">India</span>
+    </nav>
+  </header>
+
+  <!-- Map Area -->
+  <div class="map-area" id="mapArea">
+    <div class="map-loading" id="mapLoading">
+      <div class="spinner"></div>
+      <span>Loading map…</span>
+    </div>
+    <!-- D3 renders into this SVG -->
+    <svg id="map-svg" style="display:none;"></svg>
+    <div class="hint-pill" id="hintPill">✦ Click on Delhi to explore</div>
+  </div>
+
+  <!-- Side Panel -->
+  <aside class="panel" id="panel">
+    <button class="close-btn" onclick="closePanel()">✕</button>
+    <div class="panel-inner">
+
+      <!-- View: Delhi home -->
+      <div class="view active" id="view-delhi">
+        <div class="panel-eyebrow">Capital Territory</div>
+        <h1 class="panel-title">Delhi</h1>
+        <p class="panel-desc">Where the Mughals feasted and merchants built empires. Choose how you want to experience this timeless city.</p>
+        <div class="option-grid">
+          <div class="option-card food-card" onclick="showView('view-food')">
+            <div class="option-icon food">🍛</div>
+            <div class="option-text">
+              <h3>Best Food Options</h3>
+              <p>Iconic neighbourhoods & legendary street eats</p>
+            </div>
+            <span class="option-arrow">›</span>
+          </div>
+          <div class="option-card shop-card" onclick="showView('view-shopping')">
+            <div class="option-icon shop">🛍️</div>
+            <div class="option-text">
+              <h3>Best Shopping Options</h3>
+              <p>Bridal bazaars to vibrant street markets</p>
+            </div>
+            <span class="option-arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- View: Food -->
+      <div class="view" id="view-food">
+        <button class="back-btn" onclick="showView('view-delhi')">← Back to Delhi</button>
+        <div class="panel-eyebrow">Food Guide</div>
+        <h1 class="panel-title">Where to Eat</h1>
+        <p class="panel-desc">Two legendary food districts — each a universe of flavour.</p>
+
+        <div class="food-card-item">
+          <div class="food-header">
+            <h3>🌆 Karol Bagh</h3>
+            <p>A vibrant urban neighbourhood beloved for its all-day food scene — parathas at dawn, chaat at dusk, everything in between.</p>
+          </div>
+          <div class="food-body">
+            <div class="chip-label">Famous dishes</div>
+            <div class="chips">
+              <span class="chip">Puri Sabzi</span>
+              <span class="chip">Aloo Tikki</span>
+              <span class="chip">Chole Bhature</span>
+              <span class="chip">Jalebi</span>
+              <span class="chip">Gol Gappe</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="food-card-item">
+          <div class="food-header">
+            <h3>🕌 Chandni Chowk</h3>
+            <p>One of Asia's oldest markets — its narrow lanes have fed emperors for 400 years. An unmissable pilgrimage for food lovers.</p>
+          </div>
+          <div class="food-body">
+            <div class="chip-label">Famous dishes</div>
+            <div class="chips">
+              <span class="chip">Paratha Wali Gali</span>
+              <span class="chip">Daulat Ki Chaat</span>
+              <span class="chip">Kachori</span>
+              <span class="chip">Kulfi Faluda</span>
+              <span class="chip">Nihari</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- View: Shopping -->
+      <div class="view" id="view-shopping">
+        <button class="back-btn" onclick="showView('view-delhi')">← Back to Delhi</button>
+        <div class="panel-eyebrow">Shopping Guide</div>
+        <h1 class="panel-title">Where to Shop</h1>
+        <p class="panel-desc">From grand bridal trousseau hunts to casual everyday finds.</p>
+
+        <div class="shop-accordion" id="acc-wedding">
+          <div class="shop-accordion-header" onclick="toggleAcc('acc-wedding')">
+            <span class="shop-acc-icon">💍</span>
+            <h3>Wedding Shopping</h3>
+            <span class="shop-acc-chevron">▾</span>
+          </div>
+          <div class="shop-accordion-body">
+            <div class="shop-acc-inner">
+              <p>Delhi is India's undisputed bridal capital — find Banarasi silks, Zardozi lehengas, and heirloom jewellery all within a few lanes.</p>
+              <div class="chips">
+                <span class="chip gold-chip">Chandni Chowk Bridal</span>
+                <span class="chip gold-chip">Lajpat Nagar</span>
+                <span class="chip gold-chip">Karol Bagh Market</span>
+                <span class="chip gold-chip">Sarojini Nagar</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="shop-accordion" id="acc-casual">
+          <div class="shop-accordion-header" onclick="toggleAcc('acc-casual')">
+            <span class="shop-acc-icon">👟</span>
+            <h3>Casual Shopping</h3>
+            <span class="shop-acc-chevron">▾</span>
+          </div>
+          <div class="shop-accordion-body">
+            <div class="shop-acc-inner">
+              <p>Street fashion, handcrafted souvenirs, electronics, and daily wear — unbeatable prices and unmatchable variety.</p>
+              <div class="chips">
+                <span class="chip">Janpath Market</span>
+                <span class="chip">Dilli Haat</span>
+                <span class="chip">Palika Bazaar</span>
+                <span class="chip">Connaught Place</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+</div>
+
+<!-- D3 + TopoJSON -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+/* ════════════════════════════════════════════
+   MAP SETUP — D3 + real India GeoJSON
+   ════════════════════════════════════════════ */
+
+// India states GeoJSON from a reliable CDN
+const INDIA_GEOJSON = 'https://cdn.jsdelivr.net/npm/india-geojson@1.0.0/india_states.geojson';
+
+// Fallback: use a simpler but accurate India outline from datamaps
+const INDIA_TOPO = 'https://cdn.jsdelivr.net/npm/datamaps@0.5.10/src/js/data/ind.topo.json';
+
+const svg = d3.select('#map-svg');
+const width = 540, height = 620;
+svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+// Projection centred on India
+const projection = d3.geoMercator()
+  .center([82.5, 22])
+  .scale(950)
+  .translate([width / 2, height / 2]);
+
+const path = d3.geoPath().projection(projection);
+
+// Delhi's approximate centroid for pulse rings & label
+const delhiCenter = projection([77.1025, 28.7041]);
+
+// State name variations that mean Delhi
+const DELHI_NAMES = ['delhi', 'nct of delhi', 'national capital territory of delhi', 'nct', 'new delhi'];
+
+function isDelhi(name) {
+  return name && DELHI_NAMES.includes(name.toLowerCase().trim());
+}
+
+// Load GeoJSON and render map
+async function loadMap() {
+  try {
+    // Try primary GeoJSON source
+    const res = await fetch(INDIA_GEOJSON);
+    if (!res.ok) throw new Error('primary failed');
+    const geojson = await res.json();
+    renderMap(geojson.features);
+  } catch(e) {
+    // Fallback to TopoJSON
+    try {
+      const res2 = await fetch(INDIA_TOPO);
+      const topo = await res2.json();
+      // datamaps topo key is 'ind'
+      const key = Object.keys(topo.objects)[0];
+      const geojson = topojson.feature(topo, topo.objects[key]);
+      renderMap(geojson.features);
+    } catch(e2) {
+      // Final fallback — embedded simplified GeoJSON
+      renderFallback();
+    }
+  }
+}
+
+function renderMap(features) {
+  document.getElementById('mapLoading').style.display = 'none';
+  svg.style('display', 'block');
+
+  // Draw state paths
+  const g = svg.append('g').attr('class', 'states-group');
+
+  g.selectAll('.state-path')
+    .data(features)
+    .enter()
+    .append('path')
+    .attr('class', d => {
+      const name = d.properties.NAME_1 || d.properties.name || d.properties.st_nm || d.properties.NAME || '';
+      return 'state-path' + (isDelhi(name) ? ' delhi-state' : '');
+    })
+    .attr('d', path)
+    .on('click', function(event, d) {
+      const name = d.properties.NAME_1 || d.properties.name || d.properties.st_nm || d.properties.NAME || '';
+      if (isDelhi(name)) openDelhi();
+    });
+
+  // Delhi pulse rings
+  const delhiFeature = features.find(d => {
+    const name = d.properties.NAME_1 || d.properties.name || d.properties.st_nm || d.properties.NAME || '';
+    return isDelhi(name);
+  });
+
+  // Calculate actual Delhi centroid from geometry
+  let cx = delhiCenter[0], cy = delhiCenter[1];
+  if (delhiFeature) {
+    const centroid = path.centroid(delhiFeature);
+    if (!isNaN(centroid[0])) { cx = centroid[0]; cy = centroid[1]; }
+  }
+
+  const pulseG = svg.append('g').attr('class', 'delhi-pulse-group');
+
+  pulseG.append('circle')
+    .attr('class', 'delhi-ring delhi-ring-1')
+    .attr('cx', cx).attr('cy', cy).attr('r', 6);
+
+  pulseG.append('circle')
+    .attr('class', 'delhi-ring delhi-ring-2')
+    .attr('cx', cx).attr('cy', cy).attr('r', 6);
+
+  // Delhi label
+  const labelG = svg.append('g')
+    .attr('class', 'delhi-tooltip')
+    .style('cursor', 'pointer')
+    .on('click', openDelhi);
+
+  labelG.append('rect')
+    .attr('x', cx + 10).attr('y', cy - 18)
+    .attr('width', 58).attr('height', 22)
+    .attr('rx', 6)
+    .attr('fill', 'rgba(13,17,23,0.75)')
+    .attr('stroke', 'rgba(232,98,26,0.4)')
+    .attr('stroke-width', 1);
+
+  labelG.append('text')
+    .attr('x', cx + 39).attr('y', cy - 3)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#F7F3EE')
+    .attr('font-family', 'Outfit, sans-serif')
+    .attr('font-size', '10px')
+    .attr('font-weight', '500')
+    .attr('letter-spacing', '0.06em')
+    .text('DELHI ✦');
+}
+
+// Fallback renderer using a carefully crafted India outline
+function renderFallback() {
+  document.getElementById('mapLoading').style.display = 'none';
+  svg.style('display', 'block');
+
+  // A reasonably accurate India GeoJSON outline as an embedded object
+  const indiaOutline = {
+    "type": "Feature",
+    "properties": { "name": "India" },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [[
+        [68.18,23.69],[67.44,23.95],[67.14,24.66],[66.68,24.85],[62.66,23.32],
+        [60.88,22.65],[62.30,21.12],[63.17,20.26],[65.53,19.84],[68.18,15.83],
+        [70.17,14.21],[72.58,15.50],[73.00,16.50],[74.10,17.00],[74.79,15.99],
+        [76.59,14.87],[77.55,12.58],[79.34,11.26],[80.31,10.31],[81.56,9.43],
+        [80.17,7.25],[80.75,9.27],[81.71,8.84],[83.00,9.95],[82.50,11.70],
+        [80.00,13.50],[80.28,14.68],[80.02,15.90],[80.89,16.49],[80.55,17.98],
+        [81.30,18.83],[82.09,18.30],[82.78,18.90],[83.29,18.30],[83.96,18.08],
+        [84.40,18.80],[85.10,19.38],[86.00,19.59],[87.00,20.14],[87.00,21.00],
+        [87.46,21.50],[88.00,22.00],[88.88,22.88],[88.53,23.64],[88.69,24.23],
+        [88.08,24.50],[88.14,24.95],[88.73,25.20],[88.56,25.95],[89.07,26.00],
+        [88.91,26.52],[88.14,26.81],[88.83,27.10],[88.92,27.32],[88.37,27.91],
+        [88.83,28.01],[88.64,28.50],[87.23,27.82],[86.02,27.96],[85.82,28.20],
+        [85.01,28.64],[84.10,28.84],[83.06,29.63],[81.99,30.26],[80.30,30.54],
+        [79.40,31.02],[78.19,31.54],[78.46,32.04],[79.18,32.48],[79.83,32.52],
+        [79.22,33.00],[78.73,33.36],[78.00,34.50],[78.91,34.19],[79.61,34.35],
+        [73.31,34.75],[72.00,34.00],[70.73,33.73],[69.50,33.72],[70.00,32.00],
+        [69.00,31.00],[66.82,30.51],[66.00,30.00],[62.00,28.00],[61.10,27.00],
+        [60.90,26.00],[62.50,26.56],[63.36,26.11],[63.23,26.86],[63.97,27.28],
+        [65.00,26.00],[64.10,25.10],[63.23,24.86],[62.30,24.00],[68.18,23.69]
+      ]]
+    }
+  };
+
+  const g = svg.append('g');
+  g.append('path')
+    .datum(indiaOutline)
+    .attr('class', 'state-path')
+    .attr('d', path);
+
+  // Draw Delhi as a small highlighted region
+  const delhiGeo = {
+    "type": "Feature",
+    "properties": { "name": "Delhi" },
+    "geometry": {
+      "type": "Polygon",
+      "coordinates": [[
+        [76.84,28.88],[77.35,28.88],[77.35,28.40],[76.84,28.40],[76.84,28.88]
+      ]]
+    }
+  };
+
+  g.append('path')
+    .datum(delhiGeo)
+    .attr('class', 'state-path delhi-state')
+    .attr('d', path)
+    .on('click', openDelhi);
+
+  addPulseAndLabel(projection([77.10, 28.64]));
+}
+
+function addPulseAndLabel([cx, cy]) {
+  svg.append('circle').attr('class','delhi-ring delhi-ring-1').attr('cx',cx).attr('cy',cy).attr('r',6);
+  svg.append('circle').attr('class','delhi-ring delhi-ring-2').attr('cx',cx).attr('cy',cy).attr('r',6);
+
+  const lg = svg.append('g').attr('class','delhi-tooltip').style('cursor','pointer').on('click',openDelhi);
+  lg.append('rect').attr('x',cx+10).attr('y',cy-18).attr('width',58).attr('height',22).attr('rx',6)
+    .attr('fill','rgba(13,17,23,0.75)').attr('stroke','rgba(232,98,26,0.4)').attr('stroke-width',1);
+  lg.append('text').attr('x',cx+39).attr('y',cy-3).attr('text-anchor','middle')
+    .attr('fill','#F7F3EE').attr('font-family','Outfit,sans-serif').attr('font-size','10px')
+    .attr('font-weight','500').attr('letter-spacing','0.06em').text('DELHI ✦');
+}
+
+loadMap();
+
+/* ════════════════════════════════════════════
+   PANEL & NAVIGATION
+   ════════════════════════════════════════════ */
+
+let currentView = null;
+
+const breadcrumbMap = {
+  'view-delhi':    ['India', 'Delhi'],
+  'view-food':     ['India', 'Delhi', 'Food'],
+  'view-shopping': ['India', 'Delhi', 'Shopping'],
+};
+
+function openDelhi() {
+  // Highlight Delhi state
+  d3.selectAll('.delhi-state').classed('active', true);
+  document.getElementById('panel').classList.add('open');
+  document.getElementById('mapArea').classList.add('shifted');
+  document.getElementById('mapGlow').classList.add('shifted');
+  document.getElementById('hintPill').classList.add('hidden');
+  setView('view-delhi');
+}
+
+function closePanel() {
+  d3.selectAll('.delhi-state').classed('active', false);
+  document.getElementById('panel').classList.remove('open');
+  document.getElementById('mapArea').classList.remove('shifted');
+  document.getElementById('mapGlow').classList.remove('shifted');
+  document.getElementById('hintPill').classList.remove('hidden');
+  if (currentView) {
+    document.getElementById(currentView).classList.remove('active');
+    currentView = null;
+  }
+  updateBreadcrumb([]);
+}
+
+function showView(id) {
+  if (currentView) document.getElementById(currentView).classList.remove('active');
+  setView(id);
+  document.getElementById('panel').scrollTop = 0;
+}
+
+function setView(id) {
+  currentView = id;
+  document.getElementById(id).classList.add('active');
+  updateBreadcrumb(breadcrumbMap[id] || []);
+}
+
+function updateBreadcrumb(steps) {
+  const bc = document.getElementById('breadcrumb');
+  if (!steps.length) { bc.innerHTML = '<span class="crumb active">India</span>'; return; }
+  bc.innerHTML = steps.map((s, i) => {
+    const last = i === steps.length - 1;
+    return `<span class="crumb${last?' active':''}">${s}</span>${!last?'<span class="sep">›</span>':''}`;
+  }).join('');
+}
+
+function toggleAcc(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+</script>
+</body>
+</html>
